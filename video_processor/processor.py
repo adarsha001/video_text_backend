@@ -8,8 +8,10 @@ from yt_dlp import YoutubeDL
 import re
 import logging
 from textblob import TextBlob
-
+from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
+load_dotenv()
+session_id = os.getenv("YOUTUBE_SESSION_ID")
 
 class VideoProcessor:
     def __init__(self, base_dir):
@@ -27,6 +29,10 @@ class VideoProcessor:
         os.makedirs(output_folder, exist_ok=True)
 
         ydl_opts = {
+            
+            'http_headers': {
+        'Cookie': session_id
+    },
             'quiet': False,
             'outtmpl': os.path.join(output_folder, '%(id)s.%(ext)s'),
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',

@@ -1,21 +1,29 @@
+# Use Python 3.10 base image for compatibility
 FROM python:3.10-slim
 
-# Install system build tools and curl (required for building wheels and downloading rustup)
-RUN apt-get update && apt-get install -y build-essential curl
+# Set working directory
+WORKDIR /app
 
-# Install Rust (required by maturin and some Python packages like pywinpty)
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Copy your requirements file
-COPY requirements.txt .
+# Install OS dependencies (adjust as needed)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
+COPY requirements.txt .
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install -r requirements.txt
 
-# Copy the rest of your application code
+# Copy application code
 COPY . .
 
-# Default command
-CMD ["python", "your_app.py"]
+# Expose port (adjust based on your app)
+EXPOSE 5000
+
+# Set entrypoint (adjust based on how your Flask app is run)
+CMD ["python", "app.py"]

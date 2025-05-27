@@ -1,0 +1,30 @@
+# Ignore environment files
+.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Logs
+*.log
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# Python virtual environment
+venv/
+env/
+
+# Frame and download folders (optional if you want to skip large output)
+downloads/
+frames/
+pdf/
+uploads/
