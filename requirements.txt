@@ -175,3 +175,4 @@ widgetsnbextension==4.0.13
 wrapt==1.12.1
 yt-dlp==2025.5.22
 zipp==3.21.0
+python-dotenv
