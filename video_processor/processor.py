@@ -8,21 +8,22 @@ from yt_dlp import YoutubeDL
 import re
 import logging
 from textblob import TextBlob
-
 import time
 
 logger = logging.getLogger(__name__)
-
 
 class VideoProcessor:
     def __init__(self, base_dir):
         self.base_dir = base_dir
         self.cookies_path = os.path.join(base_dir, 'cookies.txt')
         
-        # Ensure cookies file exists or create empty one
+        # Initialize cookies file only if it doesn't exist
         if not os.path.exists(self.cookies_path):
-            with open(self.cookies_path, 'w') as f:
-                f.write("# HTTP Cookie File\n")
+            try:
+                with open(self.cookies_path, 'w') as f:
+                    f.write("# HTTP Cookie File\n")
+            except Exception as e:
+                logger.warning(f"Could not create cookies file: {str(e)}")
 
     def sanitize_filename(self, filename):
         filename = filename.split('?')[0]
@@ -35,39 +36,29 @@ class VideoProcessor:
         output_folder = os.path.join(self.base_dir, 'downloads', session_id)
         os.makedirs(output_folder, exist_ok=True)
 
+        # Basic options that work for most videos
         ydl_opts = {
-            'cookiefile': self.cookies_path,
             'quiet': False,
             'outtmpl': os.path.join(output_folder, '%(id)s.%(ext)s'),
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'retries': 10,  # Increased retries
+            'retries': 3,
             'socket_timeout': 30,
             'extract_flat': False,
             'ignoreerrors': False,
             'no_warnings': False,
-            'verbose': True,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-            },
-            'sleep_interval': 5,  # Add delay between requests
-            'max_sleep_interval': 30,
-            'retry_sleep': {
-                'min': 3,
-                'max': 10
             }
         }
 
+        # Only add cookies if the file exists and is not empty
+        if os.path.exists(self.cookies_path) and os.path.getsize(self.cookies_path) > 50:  # 50 bytes minimum
+            ydl_opts['cookiefile'] = self.cookies_path
+        else:
+            logger.warning("No valid cookies file found, proceeding without cookies")
+
         try:
             with YoutubeDL(ydl_opts) as ydl:
-                # Add delay to avoid rate limiting
-                time.sleep(2)
-                
                 info = ydl.extract_info(url, download=True)
                 downloaded_filename = ydl.prepare_filename(info)
 
@@ -81,8 +72,13 @@ class VideoProcessor:
 
                 return final_path
         except Exception as e:
-            logger.error(f"Error downloading video: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to download video. Please ensure your cookies are valid or try again later. Error: {str(e)}")
+            error_msg = str(e)
+            if "Sign in to confirm you're not a bot" in error_msg:
+                error_msg += ("\n\nTo download restricted videos, please provide YouTube cookies. "
+                            "You can export cookies from your browser using extensions like "
+                            "'Get cookies.txt' for Chrome or 'Export Cookies' for Firefox.")
+            logger.error(f"Error downloading video: {error_msg}", exc_info=True)
+            raise RuntimeError(f"Failed to download video: {error_msg}")
 
     # [Rest of your existing methods remain unchanged...]
     def is_black_or_white(self, frame):
