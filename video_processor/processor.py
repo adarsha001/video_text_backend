@@ -9,6 +9,7 @@ import re
 import logging
 from textblob import TextBlob
 import time
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -16,14 +17,30 @@ class VideoProcessor:
     def __init__(self, base_dir):
         self.base_dir = base_dir
         self.cookies_path = os.path.join(base_dir, 'cookies.txt')
+        self.cookies_browser = 'chrome'  # Can be 'chrome', 'firefox', 'edge', etc.
         
         # Initialize cookies file only if it doesn't exist
         if not os.path.exists(self.cookies_path):
             try:
                 with open(self.cookies_path, 'w') as f:
                     f.write("# HTTP Cookie File\n")
+                logger.info("Created empty cookies file")
             except Exception as e:
                 logger.warning(f"Could not create cookies file: {str(e)}")
+
+    def validate_cookies(self):
+        """Check if cookies file exists and appears valid"""
+        if not os.path.exists(self.cookies_path):
+            return False
+        
+        try:
+            with open(self.cookies_path, 'r') as f:
+                content = f.read()
+                # Basic validation - check for YouTube domain and typical cookie patterns
+                return ('.youtube.com' in content and 
+                        any(c in content for c in ['SID', 'HSID', 'SSID', 'APISID']))
+        except Exception:
+            return False
 
     def sanitize_filename(self, filename):
         filename = filename.split('?')[0]
@@ -36,7 +53,7 @@ class VideoProcessor:
         output_folder = os.path.join(self.base_dir, 'downloads', session_id)
         os.makedirs(output_folder, exist_ok=True)
 
-        # Basic options that work for most videos
+        # Enhanced download options
         ydl_opts = {
             'quiet': False,
             'outtmpl': os.path.join(output_folder, '%(id)s.%(ext)s'),
@@ -48,37 +65,79 @@ class VideoProcessor:
             'no_warnings': False,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Referer': 'https://www.youtube.com/',
+            },
+            'extractor_args': {
+                'youtube': {
+                    'skip': ['dash', 'hls'],
+                    'player_client': ['android', 'web']
+                }
+            },
+            'postprocessor_args': {
+                'ffmpeg': ['-hide_banner', '-loglevel', 'error']
             }
         }
 
-        # Only add cookies if the file exists and is not empty
-        if os.path.exists(self.cookies_path) and os.path.getsize(self.cookies_path) > 50:  # 50 bytes minimum
+        # Try multiple authentication methods in order
+        auth_methods = [
+            self._try_with_browser_cookies,
+            self._try_with_cookies_file,
+            self._try_without_auth
+        ]
+
+        last_error = None
+        for method in auth_methods:
+            try:
+                return method(url, session_id, ydl_opts.copy())
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Download attempt failed with {method.__name__}: {str(e)}")
+                continue
+
+        # If all methods failed
+        error_msg = str(last_error)
+        if "Sign in to confirm you're not a bot" in error_msg:
+            error_msg += ("\n\nTo download restricted videos, please provide valid YouTube cookies. "
+                        "You can export cookies from your browser using extensions like:\n"
+                        "- 'Get cookies.txt' for Chrome\n"
+                        "- 'Export Cookies' for Firefox\n"
+                        "Place the cookies.txt file in the backend directory.")
+        
+        logger.error(f"All download attempts failed. Last error: {error_msg}")
+        raise RuntimeError(f"Failed to download video: {error_msg}")
+
+    def _try_with_browser_cookies(self, url, session_id, ydl_opts):
+        """Try downloading using browser cookies"""
+        ydl_opts['cookiesfrombrowser'] = (self.cookies_browser,)
+        return self._perform_download(url, session_id, ydl_opts)
+
+    def _try_with_cookies_file(self, url, session_id, ydl_opts):
+        """Try downloading using cookies file"""
+        if self.validate_cookies():
             ydl_opts['cookiefile'] = self.cookies_path
-        else:
-            logger.warning("No valid cookies file found, proceeding without cookies")
+            return self._perform_download(url, session_id, ydl_opts)
+        raise RuntimeError("No valid cookies file available")
 
-        try:
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                downloaded_filename = ydl.prepare_filename(info)
+    def _try_without_auth(self, url, session_id, ydl_opts):
+        """Try downloading without authentication"""
+        return self._perform_download(url, session_id, ydl_opts)
 
-                file_ext = os.path.splitext(downloaded_filename)[1].lower()
-                clean_base = self.sanitize_filename(info.get('title', 'video'))
-                final_filename = f"{info['id']}_{clean_base}{file_ext}"
-                final_path = os.path.join(output_folder, final_filename)
+    def _perform_download(self, url, session_id, ydl_opts):
+        """Perform the actual download with given options"""
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            downloaded_filename = ydl.prepare_filename(info)
 
-                if downloaded_filename != final_path:
-                    os.rename(downloaded_filename, final_path)
+            file_ext = os.path.splitext(downloaded_filename)[1].lower()
+            clean_base = self.sanitize_filename(info.get('title', 'video'))
+            final_filename = f"{info['id']}_{clean_base}{file_ext}"
+            final_path = os.path.join(ydl_opts['outtmpl'].rsplit('/', 1)[0], final_filename)
 
-                return final_path
-        except Exception as e:
-            error_msg = str(e)
-            if "Sign in to confirm you're not a bot" in error_msg:
-                error_msg += ("\n\nTo download restricted videos, please provide YouTube cookies. "
-                            "You can export cookies from your browser using extensions like "
-                            "'Get cookies.txt' for Chrome or 'Export Cookies' for Firefox.")
-            logger.error(f"Error downloading video: {error_msg}", exc_info=True)
-            raise RuntimeError(f"Failed to download video: {error_msg}")
+            if downloaded_filename != final_path:
+                os.rename(downloaded_filename, final_path)
+
+            return final_path
 
     # [Rest of your existing methods remain unchanged...]
     def is_black_or_white(self, frame):
