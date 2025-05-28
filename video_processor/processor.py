@@ -9,13 +9,20 @@ import re
 import logging
 from textblob import TextBlob
 from dotenv import load_dotenv
+import time
+
 logger = logging.getLogger(__name__)
 load_dotenv()
-
 
 class VideoProcessor:
     def __init__(self, base_dir):
         self.base_dir = base_dir
+        self.cookies_path = os.path.join(base_dir, 'cookies.txt')
+        
+        # Ensure cookies file exists or create empty one
+        if not os.path.exists(self.cookies_path):
+            with open(self.cookies_path, 'w') as f:
+                f.write("# HTTP Cookie File\n")
 
     def sanitize_filename(self, filename):
         filename = filename.split('?')[0]
@@ -25,25 +32,42 @@ class VideoProcessor:
         return filename
 
     def download_video(self, url, session_id):
-        output_folder = os.path.join(self.base_dir,  'downloads', session_id)
+        output_folder = os.path.join(self.base_dir, 'downloads', session_id)
         os.makedirs(output_folder, exist_ok=True)
 
         ydl_opts = {
-            
-            'cookiefile': os.getenv("YOUTUBE_COOKIES"),
+            'cookiefile': self.cookies_path,
             'quiet': False,
             'outtmpl': os.path.join(output_folder, '%(id)s.%(ext)s'),
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'retries': 3,
+            'retries': 10,  # Increased retries
             'socket_timeout': 30,
             'extract_flat': False,
             'ignoreerrors': False,
             'no_warnings': False,
-            'verbose': True
+            'verbose': True,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            },
+            'sleep_interval': 5,  # Add delay between requests
+            'max_sleep_interval': 30,
+            'retry_sleep': {
+                'min': 3,
+                'max': 10
+            }
         }
 
         try:
             with YoutubeDL(ydl_opts) as ydl:
+                # Add delay to avoid rate limiting
+                time.sleep(2)
+                
                 info = ydl.extract_info(url, download=True)
                 downloaded_filename = ydl.prepare_filename(info)
 
@@ -57,9 +81,10 @@ class VideoProcessor:
 
                 return final_path
         except Exception as e:
-            logger.error(f"Error downloading video: {e}")
-            raise
+            logger.error(f"Error downloading video: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to download video. Please ensure your cookies are valid or try again later. Error: {str(e)}")
 
+    # [Rest of your existing methods remain unchanged...]
     def is_black_or_white(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         mean = np.mean(gray)
@@ -84,7 +109,7 @@ class VideoProcessor:
         if not cap.isOpened():
             raise ValueError("Could not open video file")
         
-        frame_dir = os.path.join(self.base_dir,  'frames', session_id)
+        frame_dir = os.path.join(self.base_dir, 'frames', session_id)
         os.makedirs(frame_dir, exist_ok=True)
         
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
