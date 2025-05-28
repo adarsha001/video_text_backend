@@ -4,7 +4,7 @@ import numpy as np
 import pytesseract
 from PIL import Image
 from fuzzywuzzy import fuzz
-from yt_dlp import YoutubeDL
+from pytube import YouTube
 import re
 import logging
 from textblob import TextBlob
@@ -16,35 +16,10 @@ logger = logging.getLogger(__name__)
 class VideoProcessor:
     def __init__(self, base_dir):
         self.base_dir = base_dir
-        self.cookies_path = os.path.join(base_dir, 'cookies.txt')
-        self.cookies_browser = 'chrome'  # Can be 'chrome', 'firefox', 'edge', etc.
-        
-        # Initialize cookies file only if it doesn't exist
-        if not os.path.exists(self.cookies_path):
-            try:
-                with open(self.cookies_path, 'w') as f:
-                    f.write("# HTTP Cookie File\n")
-                logger.info("Created empty cookies file")
-            except Exception as e:
-                logger.warning(f"Could not create cookies file: {str(e)}")
-
-    def validate_cookies(self):
-        """Check if cookies file exists and appears valid"""
-        if not os.path.exists(self.cookies_path):
-            return False
-        
-        try:
-            with open(self.cookies_path, 'r') as f:
-                content = f.read()
-                # Basic validation - check for YouTube domain and typical cookie patterns
-                return ('.youtube.com' in content and 
-                        any(c in content for c in ['SID', 'HSID', 'SSID', 'APISID']))
-        except Exception:
-            return False
 
     def sanitize_filename(self, filename):
         filename = filename.split('?')[0]
-        filename = re.sub(r'[#@$%^&*!(){}[\];:"\'<>,?/\\|~`]', '', filename)
+        filename = re.sub(r'[#@$%^&*!(){}\[\];:"\'<>,?/\\|~`]', '', filename)
         filename = re.sub(r'\s+', '_', filename.strip())
         filename = os.path.splitext(filename)[0]
         return filename
@@ -53,93 +28,22 @@ class VideoProcessor:
         output_folder = os.path.join(self.base_dir, 'downloads', session_id)
         os.makedirs(output_folder, exist_ok=True)
 
-        # Enhanced download options
-        ydl_opts = {
-            'quiet': False,
-            'outtmpl': os.path.join(output_folder, '%(id)s.%(ext)s'),
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'retries': 3,
-            'socket_timeout': 30,
-            'extract_flat': False,
-            'ignoreerrors': False,
-            'no_warnings': False,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Referer': 'https://www.youtube.com/',
-            },
-            'extractor_args': {
-                'youtube': {
-                    'skip': ['dash', 'hls'],
-                    'player_client': ['android', 'web']
-                }
-            },
-            'postprocessor_args': {
-                'ffmpeg': ['-hide_banner', '-loglevel', 'error']
-            }
-        }
+        try:
+            yt = YouTube(url)
+            stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+            if not stream:
+                raise RuntimeError("No suitable stream found")
 
-        # Try multiple authentication methods in order
-        auth_methods = [
-            self._try_with_browser_cookies,
-            self._try_with_cookies_file,
-            self._try_without_auth
-        ]
-
-        last_error = None
-        for method in auth_methods:
-            try:
-                return method(url, session_id, ydl_opts.copy())
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Download attempt failed with {method.__name__}: {str(e)}")
-                continue
-
-        # If all methods failed
-        error_msg = str(last_error)
-        if "Sign in to confirm you're not a bot" in error_msg:
-            error_msg += ("\n\nTo download restricted videos, please provide valid YouTube cookies. "
-                        "You can export cookies from your browser using extensions like:\n"
-                        "- 'Get cookies.txt' for Chrome\n"
-                        "- 'Export Cookies' for Firefox\n"
-                        "Place the cookies.txt file in the backend directory.")
-        
-        logger.error(f"All download attempts failed. Last error: {error_msg}")
-        raise RuntimeError(f"Failed to download video: {error_msg}")
-
-    def _try_with_browser_cookies(self, url, session_id, ydl_opts):
-        """Try downloading using browser cookies"""
-        ydl_opts['cookiesfrombrowser'] = (self.cookies_browser,)
-        return self._perform_download(url, session_id, ydl_opts)
-
-    def _try_with_cookies_file(self, url, session_id, ydl_opts):
-        """Try downloading using cookies file"""
-        if self.validate_cookies():
-            ydl_opts['cookiefile'] = self.cookies_path
-            return self._perform_download(url, session_id, ydl_opts)
-        raise RuntimeError("No valid cookies file available")
-
-    def _try_without_auth(self, url, session_id, ydl_opts):
-        """Try downloading without authentication"""
-        return self._perform_download(url, session_id, ydl_opts)
-
-    def _perform_download(self, url, session_id, ydl_opts):
-        """Perform the actual download with given options"""
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            downloaded_filename = ydl.prepare_filename(info)
-
-            file_ext = os.path.splitext(downloaded_filename)[1].lower()
-            clean_base = self.sanitize_filename(info.get('title', 'video'))
-            final_filename = f"{info['id']}_{clean_base}{file_ext}"
-            final_path = os.path.join(ydl_opts['outtmpl'].rsplit('/', 1)[0], final_filename)
-
-            if downloaded_filename != final_path:
-                os.rename(downloaded_filename, final_path)
-
+            clean_title = self.sanitize_filename(yt.title)
+            final_filename = f"{yt.video_id}_{clean_title}.mp4"
+            final_path = os.path.join(output_folder, final_filename)
+            stream.download(output_path=output_folder, filename=final_filename)
             return final_path
 
-    # [Rest of your existing methods remain unchanged...]
+        except Exception as e:
+            logger.error(f"Failed to download video using pytube: {str(e)}")
+            raise RuntimeError(f"Failed to download video: {str(e)}")
+
     def is_black_or_white(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         mean = np.mean(gray)
@@ -159,14 +63,14 @@ class VideoProcessor:
     def process_video(self, video_path, session_id):
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
-        
+
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError("Could not open video file")
-        
+
         frame_dir = os.path.join(self.base_dir, 'frames', session_id)
         os.makedirs(frame_dir, exist_ok=True)
-        
+
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_index = 0
         clusters = []
