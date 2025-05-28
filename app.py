@@ -11,7 +11,11 @@ import re
 # from pdf_generator.generator import PDFGenerator
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:5173","https://clipai-murex.vercel.app"])
+CORS(app, origins=[
+    "http://localhost:5173",
+    "https://clipai-murex.vercel.app",
+    "https://video-text-frontend-u7b8.vercel.app"  # Add this line
+])
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
