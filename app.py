@@ -58,7 +58,7 @@ def upload_video():
     return jsonify({'error': 'Invalid file type'}), 400
 
 # YouTube Download
-@app.route('/api/download/youtube',  methods=['POST', 'OPTIONS']))
+@app.route('/api/download/youtube',  methods=['POST', 'OPTIONS'])
 def download_youtube():
     if request.method == 'OPTIONS':
         return '', 204
