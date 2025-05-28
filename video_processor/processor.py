@@ -8,11 +8,11 @@ from yt_dlp import YoutubeDL
 import re
 import logging
 from textblob import TextBlob
-from dotenv import load_dotenv
+
 import time
 
 logger = logging.getLogger(__name__)
-load_dotenv()
+
 
 class VideoProcessor:
     def __init__(self, base_dir):
