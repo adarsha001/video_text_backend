@@ -177,3 +177,4 @@ yt-dlp==2025.5.22
 zipp==3.21.0
 python-dotenv
 
+pytube==15.0.0
