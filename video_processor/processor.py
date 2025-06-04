@@ -1,7 +1,7 @@
 import os
 import cv2
 import numpy as np
-import easyocr
+import pytesseract
 from PIL import Image
 from fuzzywuzzy import fuzz
 from yt_dlp import YoutubeDL
@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 class VideoProcessor:
     def __init__(self, base_dir):
         self.base_dir = base_dir
-        self.reader = easyocr.Reader(['en'], gpu=False)  # EasyOCR reader
 
     def sanitize_filename(self, filename):
         filename = filename.split('?')[0]
@@ -24,7 +23,7 @@ class VideoProcessor:
         return filename
 
     def download_video(self, url, session_id):
-        output_folder = os.path.join(self.base_dir, 'downloads', session_id)
+        output_folder = os.path.join(self.base_dir,  'downloads', session_id)
         os.makedirs(output_folder, exist_ok=True)
 
         ydl_opts = {
@@ -69,10 +68,9 @@ class VideoProcessor:
 
     def extract_text(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        results = self.reader.readtext(gray)
-        if results:
-            return " ".join([res[1] for res in results]).strip()
-        return ""
+        pil_img = Image.fromarray(gray)
+        text = pytesseract.image_to_string(pil_img)
+        return text.strip()
 
     def process_video(self, video_path, session_id):
         if not os.path.exists(video_path):
@@ -82,7 +80,7 @@ class VideoProcessor:
         if not cap.isOpened():
             raise ValueError("Could not open video file")
         
-        frame_dir = os.path.join(self.base_dir, 'frames', session_id)
+        frame_dir = os.path.join(self.base_dir,  'frames', session_id)
         os.makedirs(frame_dir, exist_ok=True)
         
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
