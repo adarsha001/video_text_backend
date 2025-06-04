@@ -1,25 +1,24 @@
 import os
 import cv2
 import numpy as np
-import pytesseract
+import easyocr
 from PIL import Image
 from fuzzywuzzy import fuzz
-from pytube import YouTube
+from yt_dlp import YoutubeDL
 import re
 import logging
 from textblob import TextBlob
-import time
-import json
 
 logger = logging.getLogger(__name__)
 
 class VideoProcessor:
     def __init__(self, base_dir):
         self.base_dir = base_dir
+        self.reader = easyocr.Reader(['en'], gpu=False)  # EasyOCR reader
 
     def sanitize_filename(self, filename):
         filename = filename.split('?')[0]
-        filename = re.sub(r'[#@$%^&*!(){}\[\];:"\'<>,?/\\|~`]', '', filename)
+        filename = re.sub(r'[#@$%^&*!(){}[\];:"\'<>,?/\\|~`]', '', filename)
         filename = re.sub(r'\s+', '_', filename.strip())
         filename = os.path.splitext(filename)[0]
         return filename
@@ -28,21 +27,35 @@ class VideoProcessor:
         output_folder = os.path.join(self.base_dir, 'downloads', session_id)
         os.makedirs(output_folder, exist_ok=True)
 
+        ydl_opts = {
+            'quiet': False,
+            'outtmpl': os.path.join(output_folder, '%(id)s.%(ext)s'),
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'retries': 3,
+            'socket_timeout': 30,
+            'extract_flat': False,
+            'ignoreerrors': False,
+            'no_warnings': False,
+            'verbose': True
+        }
+
         try:
-            yt = YouTube(url)
-            stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
-            if not stream:
-                raise RuntimeError("No suitable stream found")
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                downloaded_filename = ydl.prepare_filename(info)
 
-            clean_title = self.sanitize_filename(yt.title)
-            final_filename = f"{yt.video_id}_{clean_title}.mp4"
-            final_path = os.path.join(output_folder, final_filename)
-            stream.download(output_path=output_folder, filename=final_filename)
-            return final_path
+                file_ext = os.path.splitext(downloaded_filename)[1].lower()
+                clean_base = self.sanitize_filename(info.get('title', 'video'))
+                final_filename = f"{info['id']}_{clean_base}{file_ext}"
+                final_path = os.path.join(output_folder, final_filename)
 
+                if downloaded_filename != final_path:
+                    os.rename(downloaded_filename, final_path)
+
+                return final_path
         except Exception as e:
-            logger.error(f"Failed to download video using pytube: {str(e)}")
-            raise RuntimeError(f"Failed to download video: {str(e)}")
+            logger.error(f"Error downloading video: {e}")
+            raise
 
     def is_black_or_white(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -56,21 +69,22 @@ class VideoProcessor:
 
     def extract_text(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        pil_img = Image.fromarray(gray)
-        text = pytesseract.image_to_string(pil_img)
-        return text.strip()
+        results = self.reader.readtext(gray)
+        if results:
+            return " ".join([res[1] for res in results]).strip()
+        return ""
 
     def process_video(self, video_path, session_id):
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
-
+        
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError("Could not open video file")
-
+        
         frame_dir = os.path.join(self.base_dir, 'frames', session_id)
         os.makedirs(frame_dir, exist_ok=True)
-
+        
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_index = 0
         clusters = []

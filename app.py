@@ -11,7 +11,8 @@ import re
 # from pdf_generator.generator import PDFGenerator
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app, origins=["http://localhost:5173"])
+
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -58,10 +59,8 @@ def upload_video():
     return jsonify({'error': 'Invalid file type'}), 400
 
 # YouTube Download
-@app.route('/api/download/youtube',  methods=['POST', 'OPTIONS'])
+@app.route('/api/download/youtube', methods=['POST'])
 def download_youtube():
-    if request.method == 'OPTIONS':
-        return '', 204
     data = request.get_json()
     if not data or 'url' not in data:
         return jsonify({'error': 'No YouTube URL provided'}), 400
